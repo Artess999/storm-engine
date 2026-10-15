@@ -28,10 +28,15 @@ endif()
 
 ### Set up third-party dependencies
 set(ENV{CONAN_REVISIONS_ENABLED} 1)
-conan_add_remote(NAME storm
-    URL https://storm.jfrog.io/artifactory/api/conan/conan-remote
-    VERIFY_SSL True
-)
+# NOTE: the storm remote (storm.jfrog.io) is decommissioned and now serves a
+# JFrog landing page. Any resolution touching it fails hard
+# ("Response from remote is not json"). The storm/prebuilt packages
+# (directx, fmod) must come from the local conan cache, so the remote
+# must NOT be added here.
+# conan_add_remote(NAME storm
+#     URL https://storm.jfrog.io/artifactory/api/conan/conan-remote
+#     VERIFY_SSL True
+# )
 normalize_booleans(STORM_ENABLE_CRASH_REPORTS STORM_ENABLE_STEAM STORM_USE_CONAN_SDL)
 conan_cmake_run(CONANFILE conanfile.py
     BASIC_SETUP CMAKE_TARGETS

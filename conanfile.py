@@ -42,8 +42,14 @@ class StormEngine(ConanFile):
 
     default_options = {
         "sentry-native:backend": "crashpad",
-        "mimalloc:shared": True,
-        "mimalloc:override": True
+        # mimalloc-override disabled completely (per upstream guidance): the
+        # redirect/override mechanism hooks the Windows loader and is unstable
+        # on recent Windows 11 (AV in LdrEnumerateLoadedModules callback,
+        # reported as 0xc0000142 at startup) for little gain. Static linkage
+        # also drops the mimalloc-redirect.dll dependency entirely; the engine
+        # keeps using mimalloc directly for its own allocations.
+        "mimalloc:shared": False,
+        "mimalloc:override": False
     }
 
     def imports(self):
