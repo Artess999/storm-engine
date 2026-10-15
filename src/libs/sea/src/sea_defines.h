@@ -6,6 +6,12 @@
 
 #define CUBEMAP_DELTA_TIME 50
 
+// Planar reflection targets (Ocean3 rr_size equivalent). Cubemaps stay 128.
+#define SEA_REFLECTION_SIZE 512
+
+// TEMP MOP-scene test override: forces every ocean member each frame,
+// scripts bypassed. Scene datum Height -2 via fSeaHeight in the override.
+#define SEA_MOP_TEST 0
 #define SEA_FRENEL_TABLE_SIZE 512
 #define SEA_COS_TABLE_SIZE 2048
 #define SEA_EXP_TABLE_SIZE 256

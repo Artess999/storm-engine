@@ -57,6 +57,7 @@ struct INDEX_BUFFER
 {
     uint32_t dwNumLocks;
     uint32_t dwUsage;
+    uint32_t dwFormat;
     int32_t size;
     IDirect3DIndexBuffer9 *buff;
 };
@@ -212,7 +213,7 @@ class DX9RENDER : public VDX9RENDER
 
     // DX9Render: Vertex/Index Buffers Section
     int32_t CreateVertexBuffer(int32_t type, size_t nverts, uint32_t usage, uint32_t dwPool) override;
-    int32_t CreateIndexBuffer(size_t ntrgs, uint32_t dwUsage) override;
+    int32_t CreateIndexBuffer(size_t ntrgs, uint32_t dwUsage, uint32_t dwFormat = D3DFMT_INDEX16) override;
 
     IDirect3DVertexBuffer9 *GetVertexBuffer(int32_t id) override;
     int32_t GetVertexBufferFVF(int32_t id) override;

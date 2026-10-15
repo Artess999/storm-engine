@@ -8,6 +8,8 @@
 #include "shared/layers.h"
 #include "math3d/plane.h"
 
+#include "sea_defines.h"
+
 void SEA::EnvMap_GetSideMatrix(D3DCUBEMAP_FACES Face, CMatrix &mView)
 {
     CVECTOR vLookTo, vUp;
@@ -43,6 +45,46 @@ void SEA::EnvMap_GetSideMatrix(D3DCUBEMAP_FACES Face, CMatrix &mView)
     mView.BuildViewMatrix(0.0f, vLookTo, vUp);
 }
 
+namespace {
+// Ocean3 Refractor-equivalent for the planar reflection path: a mirrored
+// view flips triangle winding, so culling is inverted while rendering, and
+// the viewport is matched to the SEA_REFLECTION_SIZE target.
+// NOTE: VDX9RENDER::SetClipPlane is a no-op, so no above-water clip plane
+// can be set through the renderer (same as before this change).
+struct PlanarReflectionScope
+{
+    VDX9RENDER *rs = nullptr;
+    D3DVIEWPORT9 oldVP{};
+    uint32_t oldCull = D3DCULL_CCW;
+
+    void Begin(VDX9RENDER *r)
+    {
+        if (r->GetViewport(&oldVP) == D3D_OK && r->GetRenderState(D3DRS_CULLMODE, &oldCull) == D3D_OK)
+        {
+            rs = r;
+            D3DVIEWPORT9 vp = oldVP;
+            vp.X = 0;
+            vp.Y = 0;
+            vp.Width = SEA_REFLECTION_SIZE;
+            vp.Height = SEA_REFLECTION_SIZE;
+            vp.MinZ = 0.0f;
+            vp.MaxZ = 1.0f;
+            rs->SetViewport(&vp);
+            rs->SetRenderState(D3DRS_CULLMODE, (oldCull == D3DCULL_CW) ? D3DCULL_CCW : D3DCULL_CW);
+        }
+    }
+
+    void End()
+    {
+        if (!rs)
+            return;
+        rs->SetViewport(&oldVP);
+        rs->SetRenderState(D3DRS_CULLMODE, oldCull);
+        rs = nullptr;
+    }
+};
+} // namespace
+
 bool SEA::SunRoad_Render2()
 {
     auto mOldView = rs->GetView();
@@ -53,7 +95,8 @@ bool SEA::SunRoad_Render2()
 
     // rs->SetProjection( CMatrix().BuildProjectionMatrix(PI / 2.0f, 256.0f, 256.0f, 1.0f, 4000.0f) );
 
-    auto PlaneHeight = 0.5f;
+    // Mirror plane at sea level + Blood 0.1 lift (Refractor.cpp:71).
+    auto PlaneHeight = fSeaHeight + 0.1f;
 
     const Vector point(0, PlaneHeight, 0), normal(0, 1, 0);
     auto mPlane = Plane(normal, point);
@@ -68,7 +111,10 @@ bool SEA::SunRoad_Render2()
 
     rs->SetView(mViewNew);
 
-    uint32_t Colors[6] = {0xd934c8, 0x2FFF1F, 0x0000FF, 0xFF00, 0xb28e11, 0x0};
+    PlanarReflectionScope reflScope;
+    reflScope.Begin(rs);
+
+    uint32_t Colors[6] = {0x0, 0x0, 0x0, 0x0, 0x0, 0x0};
     // for (uint32_t i=0; i<6; i++)
     {
         // if (i == D3DCUBEMAP_FACE_NEGATIVE_Y) continue;
@@ -78,7 +124,8 @@ bool SEA::SunRoad_Render2()
         pReflectionSunroad->GetSurfaceLevel(0, &pReflectionSurface);
 
         rs->BeginScene();
-        bool bCool = rs->SetRenderTarget(pReflectionSurface, pZStencil);
+        // 512 depth to match the 512 reflection target (pZStencil is 128).
+        bool bCool = rs->SetRenderTarget(pReflectionSurface, pReflectionSurfaceDepth);
         bCool = D3D_OK != rs->Clear(0, nullptr, D3DCLEAR_ZBUFFER | D3DCLEAR_TARGET, 0x0, 1.0f, 0);
 
         // CMatrix mView;
@@ -106,6 +153,7 @@ bool SEA::SunRoad_Render2()
             }
         }
 
+        reflScope.End();
         rs->EndScene();
         pReflectionSurface->Release();
     }
@@ -129,7 +177,8 @@ bool SEA::EnvMap_Render2()
 
     // rs->SetProjection( CMatrix().BuildProjectionMatrix(PI / 2.0f, 256.0f, 256.0f, 1.0f, 4000.0f) );
 
-    auto PlaneHeight = 0.5f;
+    // Mirror plane at sea level + Blood 0.1 lift (Refractor.cpp:71).
+    auto PlaneHeight = fSeaHeight + 0.1f;
 
     const Vector point(0, PlaneHeight, 0), normal(0, 1, 0);
     auto mPlane = Plane(normal, point);
@@ -144,10 +193,13 @@ bool SEA::EnvMap_Render2()
 
     rs->SetView(mViewNew);
 
+    PlanarReflectionScope reflScope;
+    reflScope.Begin(rs);
+
     // rs->SetEffect("FlatSeaReverseCull");
     // Event("SeaReflection");
 
-    uint32_t Colors[6] = {0xd934c8, 0x2FFF1F, 0x0000FF, 0xFF00, 0xb28e11, 0x0};
+    uint32_t Colors[6] = {0x0, 0x0, 0x0, 0x0, 0x0, 0x0};
     // for (uint32_t i=0; i<6; i++)
     {
         // if (i == D3DCUBEMAP_FACE_NEGATIVE_Y) continue;
@@ -172,22 +224,30 @@ bool SEA::EnvMap_Render2()
         // core.Trace("sea: %.3f, %.3f, %.3f", mView.m[3][0], mView.m[3][1], mView.m[3][2]);
         // rs->SetView(mView);
 
-        // Render scene here.
+        // Render scene here. Blood skips Sky in the planar reflection
+        // (Refractor.cpp:125-128): sky comes from the spheremap/cube term.
         {
             auto &&entities = core.GetEntityIds(SEA_REFLECTION);
             for (auto ent_id : entities)
             {
-                core.Send_Message(ent_id, "ll", MSG_SEA_REFLECTION_DRAW, static_cast<int32_t>(bSimpleSea));
+                if (core.GetClassCode(ent_id) != dwSkyCode)
+                {
+                    core.Send_Message(ent_id, "ll", MSG_SEA_REFLECTION_DRAW, static_cast<int32_t>(bSimpleSea));
+                }
             }
         }
         {
             auto &&entities = core.GetEntityIds(SEA_REFLECTION2);
             for (auto ent_id : entities)
             {
-                core.Send_Message(ent_id, "ll", MSG_SEA_REFLECTION_DRAW, static_cast<int32_t>(bSimpleSea));
+                if (core.GetClassCode(ent_id) != dwSkyCode)
+                {
+                    core.Send_Message(ent_id, "ll", MSG_SEA_REFLECTION_DRAW, static_cast<int32_t>(bSimpleSea));
+                }
             }
         }
 
+        reflScope.End();
         rs->EndScene();
         pReflectionSurface->Release();
     }
@@ -213,6 +273,69 @@ bool SEA::EnvMap_Render2()
     return true;
 }
 
+// Refraction scene pass (shading plan Task 1): same entity set as the planar
+// reflection, but from the live camera (no mirror, no cull flip). Cleared
+// alpha is 1 so ps_Ocean3 picks the distorted sample.
+bool SEA::Refraction_Render()
+{
+    if (!pRefraction)
+        return false;
+
+    auto mOldView = rs->GetView();
+    auto mOldProjection = rs->GetProjection();
+    rs->EndScene();
+    rs->PushRenderTarget();
+
+    D3DVIEWPORT9 oldVP{};
+    D3DVIEWPORT9 vp{};
+    if (rs->GetViewport(&oldVP) == D3D_OK)
+    {
+        vp = oldVP;
+        vp.X = 0;
+        vp.Y = 0;
+        vp.Width = SEA_REFLECTION_SIZE;
+        vp.Height = SEA_REFLECTION_SIZE;
+        vp.MinZ = 0.0f;
+        vp.MaxZ = 1.0f;
+        rs->SetViewport(&vp);
+    }
+
+    IDirect3DSurface9 *pRefrSurface = nullptr;
+    pRefraction->GetSurfaceLevel(0, &pRefrSurface);
+
+    rs->BeginScene();
+    bool bCool = rs->SetRenderTarget(pRefrSurface, pReflectionSurfaceDepth);
+    bCool = D3D_OK != rs->Clear(0, nullptr, D3DCLEAR_ZBUFFER | D3DCLEAR_TARGET, 0xFF000000, 1.0f, 0);
+
+    {
+        auto &&entities = core.GetEntityIds(SEA_REFLECTION);
+        for (auto ent_id : entities)
+        {
+            core.Send_Message(ent_id, "ll", MSG_SEA_REFLECTION_DRAW, static_cast<int32_t>(bSimpleSea));
+        }
+    }
+    {
+        auto &&entities = core.GetEntityIds(SEA_REFLECTION2);
+        for (auto ent_id : entities)
+        {
+            core.Send_Message(ent_id, "ll", MSG_SEA_REFLECTION_DRAW, static_cast<int32_t>(bSimpleSea));
+        }
+    }
+
+    rs->EndScene();
+    if (pRefrSurface)
+        pRefrSurface->Release();
+
+    rs->PopRenderTarget();
+    rs->SetViewport(&oldVP);
+    rs->SetView(mOldView);
+    rs->SetProjection(mOldProjection);
+
+    rs->BeginScene();
+
+    return true;
+}
+
 bool SEA::SunRoad_Render()
 {
     CMatrix mOldView = rs->GetView();
@@ -223,7 +346,7 @@ bool SEA::SunRoad_Render()
 
     rs->SetProjection(CMatrix().BuildProjectionMatrix(PI / 2.0f, 256.0f, 256.0f, 1.0f, 4000.0f));
 
-    uint32_t Colors[6] = {0xd934c8, 0x2FFF1F, 0x0000FF, 0xFF00, 0xb28e11, 0x0};
+    uint32_t Colors[6] = {0x0, 0x0, 0x0, 0x0, 0x0, 0x0};
     for (uint32_t i = 0; i < 6; i++)
     {
         if (!bUnderSea && i == D3DCUBEMAP_FACE_NEGATIVE_Y)
@@ -278,7 +401,7 @@ bool SEA::EnvMap_Render()
 
     rs->SetProjection(CMatrix().BuildProjectionMatrix(PI / 2.0f, 256.0f, 256.0f, 1.0f, 4000.0f));
 
-    uint32_t Colors[6] = {0xd934c8, 0x2FFF1F, 0x0000FF, 0xFF00, 0xb28e11, 0x0};
+    uint32_t Colors[6] = {0x0, 0x0, 0x0, 0x0, 0x0, 0x0};
     for (uint32_t i = 0; i < 6; i++)
     {
         if (!bUnderSea && i == D3DCUBEMAP_FACE_NEGATIVE_Y)
@@ -299,19 +422,27 @@ bool SEA::EnvMap_Render()
         // core.Trace("sea: %.3f, %.3f, %.3f", mView.m[3][0], mView.m[3][1], mView.m[3][2]);
         rs->SetView(mView);
 
-        // Render scene here.
+        // Render scene here. Sky-only cube (Blood GenerateSphereMap renders
+        // only Sky): the planar reflection carries ships/islands, the cube
+        // carries the sky term (SKY answers MSG_SEA_REFLECTION_DRAW).
         {
             auto &&entities = core.GetEntityIds(SEA_REFLECTION);
             for (auto ent_id : entities)
             {
-                core.Send_Message(ent_id, "ll", MSG_SEA_REFLECTION_DRAW, static_cast<int32_t>(bSimpleSea));
+                if (core.GetClassCode(ent_id) == dwSkyCode)
+                {
+                    core.Send_Message(ent_id, "ll", MSG_SEA_REFLECTION_DRAW, static_cast<int32_t>(bSimpleSea));
+                }
             }
         }
         {
             auto &&entities = core.GetEntityIds(SEA_REFLECTION2);
             for (auto ent_id : entities)
             {
-                core.Send_Message(ent_id, "ll", MSG_SEA_REFLECTION_DRAW, static_cast<int32_t>(bSimpleSea));
+                if (core.GetClassCode(ent_id) == dwSkyCode)
+                {
+                    core.Send_Message(ent_id, "ll", MSG_SEA_REFLECTION_DRAW, static_cast<int32_t>(bSimpleSea));
+                }
             }
         }
 

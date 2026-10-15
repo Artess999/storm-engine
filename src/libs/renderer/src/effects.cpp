@@ -37,15 +37,23 @@ void Effects::setDevice(IDirect3DDevice9 *device)
 void Effects::compile(const char *fxPath)
 {
     debugMsg_ = fxPath;
-    ID3DXEffect *fx;
+    ID3DXEffect *fx = nullptr;
     ID3DXBuffer *errors = nullptr;
     std::wstring _fxPath = utf8::ConvertUtf8ToWide(fxPath);
-    CHECKD3DERR(D3DXCreateEffectFromFile(device_, _fxPath.c_str(), nullptr, nullptr, D3DXSHADER_OPTIMIZATION_LEVEL3,
-                                         nullptr, &fx, &errors));
+    HRESULT hr = D3DXCreateEffectFromFile(device_, _fxPath.c_str(), nullptr, nullptr, D3DXSHADER_OPTIMIZATION_LEVEL3,
+                                          nullptr, &fx, &errors);
+    CHECKD3DERR(hr);
 
+    // NOTE: the errors buffer carries WARNINGS too (e.g. X3571). Bailing on
+    // any output used to silently drop techniques from warning-emitting
+    // files; only a failed HRESULT (or null effect) skips registration.
     if (errors)
     {
         core.Trace(static_cast<const char *>(errors->GetBufferPointer()));
+        errors->Release();
+    }
+    if (FAILED(hr) || !fx)
+    {
         return;
     }
 

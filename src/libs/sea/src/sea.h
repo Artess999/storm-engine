@@ -4,18 +4,20 @@
 #pragma once
 
 #include "sea_base.h"
+#include "sea_defines.h"
 #include "c_vector4.h"
 #include "dx9render.h"
+#include "fft.h"
 #include "vma.hpp"
 
 
 class SEA : public SEA_BASE
 {
   private:
-    // uint32_t dwSkyCode = MakeHashValue("sky");
     uint32_t dwIslandCode = MakeHashValue("island");
     uint32_t dwShipCode = MakeHashValue("ship");
     uint32_t dwSailCode = MakeHashValue("sail");
+    uint32_t dwSkyCode = MakeHashValue("sky");
 
     static IDirect3DVertexDeclaration9 *vertexDecl_;
 
@@ -93,11 +95,13 @@ class SEA : public SEA_BASE
 
     IDirect3DTexture9 *pReflection, *pReflectionSunroad;
     IDirect3DSurface9 *pReflectionSurfaceDepth;
+    // Refraction scene target (Task 1, shading plan). Alpha cleared to 1.
+    IDirect3DTexture9 *pRefraction;
 
     bool bSimpleSea;
 
     SeaVertex *pVSea;
-    uint16_t *pTriangles;
+    uint32_t *pTriangles;
     uint32_t *pIndices;
     int32_t iVStart, iTStart, iIStart;
 
@@ -117,22 +121,117 @@ class SEA : public SEA_BASE
     std::vector<uint32_t *> aNormals;
     std::vector<uint8_t *> aBumps;
     std::vector<SeaBlock> aBlocks;
+    // Far-field flat quads (grid coords x1, z1, x2, z2), Ocean3 m_flatBlocks.
+    std::vector<CVECTOR4> flatBlocks;
 
     CVECTOR4 v4SeaColor, v4SkyColor, v4SeaParameters;
 
     std::vector<IDirect3DTexture9 *> aBumpMaps;
     IDirect3DTexture9 *pRenderTargetBumpMap;
+    // CPU-written live FFT bump map (DYNAMIC; the RT above is not lockable).
+    IDirect3DTexture9 *pLiveBumpMap;
 
     float *pSeaFrame1, *pSeaFrame2, *pSeaNormalsFrame1, *pSeaNormalsFrame2;
 
+    // Live Ocean3-style FFT waves (Task 2 of sea-ocean3 migration).
+    // Layer 1 (swell) = fftWaves, layer 2 (chop) = fftBump; the same
+    // fftBump frame feeds the per-frame bump texture.
+    fft fftWaves, fftBump;
+    fft::dcomplex *fftWavesFrame, *fftBumpFrame;
+    float fftWavesLen, fftBumpLen;
+    std::vector<float> bumpScratchA, bumpScratchB;
+
+    void SetupFFTFromSea2Attrs();
+#if SEA_MOP_TEST
+    void ApplyMopTestOverrides(); // TEMP MOP-scene test, do not commit
+#endif
+    float m_bumpU, m_bumpV;
+    float m_foamU, m_foamV;
+    void GenerateBumpMapFFT();
+    float m_bumpClock;
+
+    // NewOcean3 shading uniforms (shading plan Task 3). VS base register 40
+    // (28-39 and 58 are taken by the legacy Sea2 slots); PS uses c0-c7.
+    enum
+    {
+        OC3_REFLTRANS = 40,
+        OC3_WATER = 41,
+        OC3_SKY = 42,
+        OC3_REFR = 43,
+        OC3_REFR2 = 44,
+        OC3_SUNLIGHT = 45,
+        OC3_SUNLIGHT_PARAMS = 46,
+        OC3_SUNROAD = 47,
+        OC3_SUNROAD_COLOR = 48,
+        OC3_BUMPSCALEMOVE = 49,
+        OC3_BUMPPOWER = 50,
+        OC3_SHIFTS = 51,
+        OC3_FOAM1 = 52,
+        OC3_FOAM2 = 53,
+        OC3_FOAMCOLOR = 54,
+        OC3_FOAMROTATE = 55,
+        OC3_TRANSANGLE = 56,
+        OC3_TRANSPARAMS = 57,
+        OC3_TRANSCOLOR = 59,
+        OC3_FOGPARAMS = 60,
+        OC3_FOGCOLOR = 61,
+        OC3_DISTFADE = 62
+    };
+    // Sets NewOcean3 uniforms through the D3DX effect (returns false when the
+    // technique is missing -> caller falls back to legacy Sea2). Device-set
+    // constants do NOT survive effect BeginPass (unassigned uniforms commit
+    // as zeros), so the effect path is mandatory, not optional.
+    bool SetupOcean3Effect(const CMatrix &mWorldViewProj, const CVECTOR4 &camPos);
+
     CVECTOR vMove1, vMove2;
     float fFrame1, fFrame2;
-    float fScale1, fScale2;
+    float fScale1, fScale2; // effective sampling scales (multiplier * size/len)
+    float fSeaScale1, fSeaScale2; // Sea2.Scale1/Scale2 script multipliers (Blood Waves Scale)
+    float fSeaHeight, fSeaFake; // Sea2 Height / FakeOffset (NEW, engine defaults 0)
     float fAmp1, fAmp2;
     float _fAmp1, _fAmp2;
     float fAnimSpeed1, fAnimSpeed2;
     float fPosShift;
     float fFrenel;
+
+    // Ocean3 FFT spectra (NEW Sea2.* attributes, no legacy analog: FFTLen1,
+    // FFTAmp1, FFTWind1, FFTDir1, FFTAlign1 + same *2; defaults = Blood engine defaults).
+    float fFFTLen1, fFFTAmp1, fFFTWind1, fFFTAlign1;
+    CVECTOR vFFTDir1;
+    float fFFTLen2, fFFTAmp2, fFFTWind2, fFFTAlign2;
+    CVECTOR vFFTDir2;
+    // Ocean3 bump tiling/scroll (NEW: BumpScaleU, BumpScaleV, BumpPower,
+    // BumpAngle, BumpMoveSpeed; legacy BumpScale sets U+V together).
+    float fBumpScaleU, fBumpScaleV, fBumpPower, fBumpAngle, fBumpMoveSpeed;
+    // Ocean3 foam (NEW, no legacy analog: FoamPower, FoamBright,
+    // FoamAngle, FoamColor, FoamMoveSpeed, FoamMoveAngle. FoamV/FoamUV/
+    // FoamTexDisturb/FoamEnable reuse legacy slots; 
+    float fFoamPower, fFoamBright, fFoamAngle;
+    float fFoamMoveSpeed, fFoamMoveAngle;
+    CVECTOR4 v4FoamColor;
+    // Ocean3 sun (NEW, no legacy analog: SunRoadAngle, SunAngle,
+    // SunRoadPower, SunRoadColor, SunRoadColorPower, SunBumpScale,
+    // SunMultiply, SunAmbient; defaults = Blood engine defaults).
+    float fSunRoadAngX, fSunRoadAngY, fSunAngX, fSunAngY;
+    float fSunRoadPower, fSunRoadColorPower, fSunBumpScale;
+    float fSunMultiply, fSunAmbient;
+    CVECTOR4 v4SunRoadColor;
+    // Ocean3 translucence (NEW, no legacy analog: TransEnable, TransAngle,
+    // TransPower, TransMultiply, TransColor; engine default = on).
+    bool bTransEnable;
+    // Ocean3 sunroad toggle (NEW, no legacy analog: SunRoadEnable).
+    bool bSunRoadEnable;
+    float fTransAngle, fTransPower, fTransMultiply;
+    CVECTOR4 v4TransColor;
+    // Ocean3 reflection/refraction mix (NEW, no legacy analog: ReflMinimum,
+    // ReflAdd, ReflPower, RefrEnvPower, ReflEnvBlend, ReflMin, ReflMax,
+    // RefrPower, TransMin, TransMax; legacy Reflection/Transparency/
+    // Attenuation/Frenel keep driving the legacy Sea2 path only).
+    float fReflMinimum, fReflAdd, fReflPower, fRefrEnvPower, fReflEnvBlend;
+    float fReflMin, fReflMax, fRefrPower, fTransMin, fTransMax;
+    // Ocean3 fog distance (NEW: FogDistance; fog/Enable/Start/Color reuse
+    // the legacy slots, fog/SeaDensity doubles as the fog multiplier).
+    float fFogDistance;
 
     bool bStop;
 
@@ -159,7 +258,6 @@ class SEA : public SEA_BASE
     bool isVisibleBBox(const CVECTOR &vCenter, const CVECTOR &v1, const CVECTOR &v2);
     void CalculateLOD(const CVECTOR &v1, const CVECTOR &v2, int32_t &iMaxLOD, int32_t &iMinLOD);
     inline float CalcLod(const float &x, const float &y, const float &z);
-    [[deprecated]] void WaveXZBlock(SeaBlock &pB);
     void SSE_WaveXZBlock(SeaBlock &pB);
     SeaBlock *GetUndoneBlock();
     void PrepareIndicesForBlock(uint32_t dwBlockIndex);
@@ -173,6 +271,7 @@ class SEA : public SEA_BASE
     bool EnvMap_Render2();
     bool SunRoad_Render();
     bool EnvMap_Render();
+    bool Refraction_Render();
     void EnvMap_GetSideMatrix(D3DCUBEMAP_FACES Face, CMatrix &mView);
 
     void SFLB_CreateBuffers();
@@ -203,8 +302,6 @@ class SEA : public SEA_BASE
     {
         return false;
     }
-
-    bool EditMode_Update();
 
     uint32_t AttributeChanged(ATTRIBUTES *pAttribute) override;
 

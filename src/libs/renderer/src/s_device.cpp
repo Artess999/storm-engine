@@ -2218,7 +2218,7 @@ int32_t DX9RENDER::GetVertexBufferFVF(int32_t id)
 }
 
 //################################################################################
-int32_t DX9RENDER::CreateIndexBuffer(size_t size, uint32_t dwUsage)
+int32_t DX9RENDER::CreateIndexBuffer(size_t size, uint32_t dwUsage, uint32_t dwFormat)
 {
     int32_t b;
     for (b = 0; b < MAX_BUFFERS; b++)
@@ -2230,11 +2230,12 @@ int32_t DX9RENDER::CreateIndexBuffer(size_t size, uint32_t dwUsage)
 
     // d3d9->CreateIndexBuffer(size, D3DUSAGE_WRITEONLY, D3DFMT_INDEX16,
     if (CHECKD3DERR(
-            d3d9->CreateIndexBuffer(size, dwUsage, D3DFMT_INDEX16, D3DPOOL_DEFAULT, &IndexBuffers[b].buff, NULL)))
+            d3d9->CreateIndexBuffer(size, dwUsage, static_cast<D3DFORMAT>(dwFormat), D3DPOOL_DEFAULT, &IndexBuffers[b].buff, NULL)))
         return -1;
 
     IndexBuffers[b].size = size;
     IndexBuffers[b].dwUsage = dwUsage;
+    IndexBuffers[b].dwFormat = dwFormat;
 
     return b;
 }
@@ -2601,8 +2602,11 @@ void DX9RENDER::RestoreRender()
         }
         if (IndexBuffers[b].buff)
         {
-            CHECKD3DERR(d3d9->CreateIndexBuffer(IndexBuffers[b].size, IndexBuffers[b].dwUsage, D3DFMT_INDEX16,
-                                                D3DPOOL_DEFAULT, &IndexBuffers[b].buff, NULL));
+            // Buffers predating dwFormat stay zero-initialized -> INDEX16.
+            const auto fmt = static_cast<D3DFORMAT>(IndexBuffers[b].dwFormat ? IndexBuffers[b].dwFormat
+                                                                             : D3DFMT_INDEX16);
+            CHECKD3DERR(d3d9->CreateIndexBuffer(IndexBuffers[b].size, IndexBuffers[b].dwUsage, fmt, D3DPOOL_DEFAULT,
+                                                &IndexBuffers[b].buff, NULL));
         }
     }
     int32_t num_stages;
