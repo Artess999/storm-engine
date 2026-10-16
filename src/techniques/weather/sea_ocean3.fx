@@ -44,7 +44,7 @@ uniform float4 psBumpPower : register(c10);
 uniform float4 psCamPos : register(c11);
 uniform float4 psSunLight : register(c12);
 uniform float4 psSunLightParams : register(c13);
-uniform float4 psMisc : register(c14); // foam, translucence, sunroad enables
+uniform float4 psMisc : register(c14); // x foam, y translucence, z sunroad enables; w legacy attenuation
 uniform float4 psSunRoad : register(c15);
 uniform float4 psFoam2 : register(c16);
 uniform float4 psFoamRotate : register(c17);
@@ -161,11 +161,12 @@ float4 ps_ocean3(VSOut p) : COLOR
 
     float3 cam2Pos = normalize(psCamPos.xyz - p.t5.xyz);
 
-    // Fresnel (Blood pow6 expanded: fr^2 squared then times fr^2).
+    // Fresnel (Blood pow6 expanded: fr^2 squared then times fr^2),
+    // scaled by Sea2.Frenel strength when sent (sunLightParams.z, else 1).
     float doter = abs(dot(cam2Pos, normal));
     float fr = 1.0f - doter;
     float fr2 = fr * fr;
-    float k = fr2 * fr2 * fr2;
+    float k = fr2 * fr2 * fr2 * psSunLightParams.z;
 
     // x = reflection, y = alpha.
     float2 ra = saturate(lerp(psReflTrans.xz, psReflTrans.yw, min(1.0f, k)));
@@ -186,9 +187,12 @@ float4 ps_ocean3(VSOut p) : COLOR
 
     float4 color;
 
-    // Sun diffuse.
-    k = dot(normal, psSunLight.xyz) * psSunLightParams.x + psSunLightParams.y;
-    color.rgb = k * lerp(psWater.rgb, reflTex * psSky.rgb, ra.x);
+    // Sun diffuse (saturate: legacy clamps the unlit side) with legacy
+    // view-depth darkening on the REFLECTION term (Attenuation in misc.w):
+    // 2^(-Att/|cosV|), 1 when Att = 0.
+    float atten = exp2(-psMisc.w / max(cam2Pos.y, 0.05f));
+    k = saturate(dot(normal, psSunLight.xyz)) * psSunLightParams.x + psSunLightParams.y;
+    color.rgb = k * lerp(psWater.rgb, reflTex * psSky.rgb * atten, ra.x);
 
     // Refraction tint.
     float4 refrTex = tex2D(RefrSmp, normal.xz * psRefr.xx + ruv.xy);
@@ -224,9 +228,11 @@ float4 ps_ocean3(VSOut p) : COLOR
 
     color.rgb += addReflColor;
 
-    // Fog last (Blood Ocean3.fx:182-199).
-    float fogFade = max(0.0f, (p.t1.z - psFogParams.z) * psFogParams.y);
-    float fogk = saturate(psFogParams.x * (1.0f - exp(-fogFade)));
+    // Fog last. Legacy curve (density as rate, not cap):
+    // 1 - 2^(-(dist-start)*Density/FogDistance). FogDistance 1.0 (legacy
+    // scripts don't send it) reduces to the exact legacy curve.
+    float fogk =
+        saturate(1.0f - exp2(-max(0.0f, p.t1.z - psFogParams.z) * psFogParams.x / max(psFogParams.y, 1e-6f)));
 
     return float4(lerp(color.rgb, psFogColor.rgb, fogk), 1.0f);
 }

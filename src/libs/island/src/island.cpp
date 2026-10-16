@@ -32,7 +32,6 @@ ISLAND::ISLAND()
     pGS = nullptr;
     pDepthMap = nullptr;
     pShadowMap = nullptr;
-    bDrawReflections = false;
 
     fCurrentImmersion = 0.0f;
 }
@@ -186,7 +185,10 @@ void ISLAND::Realize(uint32_t Delta_Time)
     pRS->SetRenderState(D3DRS_FOGDENSITY, F2DW(fOldFogDensity));
 
     pRS->SetNearFarPlane(fOldNear, fOldFar / 2.0f);
-    if (!bDrawReflections)
+    // The seabed (underwater shelf) is always drawn: in the main pass the
+    // legacy alpha-blended sea shows it directly, in the refraction pass the
+    // opaque Ocean3 surface shows it via the refraction target. Visibility
+    // is driven by water transparency, no message changes needed.
     {
         pRS->SetRenderState(D3DRS_FOGENABLE, false);
         // pRS->SetRenderState(D3DRS_AMBIENT, RGB(dwAmbient/4,dwAmbient/4,dwAmbient/4));
@@ -264,9 +266,7 @@ uint64_t ISLAND::ProcessMessage(MESSAGE &message)
         // CreateShadowMap(cModelsDir, cModelsID);
         break;
     case MSG_SEA_REFLECTION_DRAW:
-        bDrawReflections = true;
         Realize(0);
-        bDrawReflections = false;
         break;
     case MSG_MODEL_SET_MAX_VIEW_DIST:
         core.Send_Message(model_id, "lf", MSG_MODEL_SET_MAX_VIEW_DIST, message.Float());

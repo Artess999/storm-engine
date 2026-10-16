@@ -54,29 +54,27 @@ SEA::SEA()
     aBumpMaps.reserve(FRAMES);
     aNormals.reserve(FRAMES);
 
-    dwMaxDim = 81920; // Blood grid budget (16-bit cap caused trims/holes)
-    dwMinDim = 256;
+    dwMaxDim = 81920; // adapted: old 131072 overflows 16-bit indices (trims/holes)
+    dwMinDim = 256; // adapted: old 128
 
     fMaxSeaHeight = 20.0f;
     fSeaHeight = 0.0f; // Blood engine default Height (Ocean.cpp:2203)
     fSeaFake = 0.0f; // Blood engine default Fake Offset
-    fMaxSeaDistance = 2200.0f; // Blood engine default Waves Distance
-    fGridStep = 0.0745f; // Blood mesh density
-    fLodScale = 0.112f; // Blood LOD curve
+    fMaxSeaDistance = 1600.0f; // restored storm default (same units: distFade = 1/m)
+    fGridStep = 0.07f; // restored storm default
+    fLodScale = 0.5f; // restored storm default
 
-    fAmp1 = 1.0f;
-    _fAmp1 = 1.0f; // Blood effective amplitude (their temp-1.0 override)
+    _fAmp1 = 8.0f; // restored storm default (effective fAmp1 via UpdateLegacyAmp)
+    fAmp1 = 8.0f;
     fFrame1 = 0.0f;
     vMove1 = 0.0f;
-    fScale1 = 0.5f; // overwritten by SetupFFTFromSea2Attrs (multiplier*128/len)
-    fSeaScale1 = 1.0f; // Blood engine default Waves Scale
+    fScale1 = 0.5f; // overwritten by SetupFFTFromSea2Attrs (128 texels / FFTLen)
 
-    fAmp2 = 0.0f;
-    _fAmp2 = 0.0f; // Blood bump frame is texture-only, no geometry term
+    _fAmp2 = 1.0f; // restored storm default (effective fAmp2 via UpdateLegacyAmp)
+    fAmp2 = 1.0f;
     fFrame2 = 10.0f;
     vMove2 = 0.0f;
-    fScale2 = 2.0f;
-    fSeaScale2 = 1.0f;
+    fScale2 = 2.0f; // overwritten by SetupFFTFromSea2Attrs (128 texels / FFTLen)
 
     // Blood engine defaults (MOP_* in Ocean.cpp:2197). Datum = Height 0.0
     // (fSeaHeight member, settable via Sea2.Height).
@@ -91,16 +89,18 @@ SEA::SEA()
     vFFTDir2 = CVECTOR(1.0f, 0.0f, 0.0f);
     fFFTAlign2 = 0.0f;
 
-    fAnimSpeed1 = 1.25f; // Blood engine default wave_speed
-    fAnimSpeed2 = 2.0f; // Blood engine default wave_speed2
+    fAnimSpeed1 = 6.0f; // restored storm default (baked frames/sec; FFT time adapted at Execute)
+    fAnimSpeed2 = 3.0f; // restored storm default (same)
+    fFftSpeed1 = 6.0f * SEA_FFT_TIME_SCALE; // = 1.25: legacy default in FFT time
+    fFftSpeed2 = 3.0f * SEA_FFT_TIME_SCALE; // = 0.625: same single scale
 
-    vMoveSpeed1 = CVECTOR(3.0f, 0.0f, 0.0f); // Blood Wave Move
-    vMoveSpeed2 = CVECTOR(0.0f, 0.0f, 0.0f);
+    vMoveSpeed1 = CVECTOR(5.0f, 0.0f, 0.0f); // restored storm default (same m/s units)
+    vMoveSpeed2 = CVECTOR(0.0f, 0.0f, 2.0f); // restored storm default
 
-    fPosShift = 12.0f / 5.0f * sqrtf(256.0f / 128.0f); // Blood Choppy/sqrt(size): exact 3.3941
+    fPosShift = 1.2f; // restored storm default (same shift units: normal.xz * PosShift * 3)
 
-    fBumpScaleU = 12.0f;
-    fBumpScaleV = 12.0f; // MOP raw engine defaults (handler *0.004)
+    fBumpScaleU = 25.0f;
+    fBumpScaleV = 25.0f; // adapted: old BumpScale 0.1 storm-final / 0.004 MOP raw
     fBumpScale = 0.1f; // legacy baked-UV path only (ocean3 uses U/V above)
     fBumpSpeed = 1.0f; // legacy clock (ocean3 scroll uses BumpMoveSpeed)
     fFrenel = 0.75f; // legacy sea.fx only
@@ -108,7 +108,7 @@ SEA::SEA()
     fBumpAngle = 60.0f * 3.14159265f / 180.0f;
     fBumpMoveSpeed = 100.0f; // engine default (scroll = *0.005 m/s)
 
-    v4SeaColor = CVECTOR4(0.1f, 0.2f, 0.2f, 1.0f); // engine default Water color
+    v4SeaColor = CVECTOR4(10.0f / 255.0f, 55.0f / 255.0f, 100.0f / 255.0f, 1.0f); // restored storm default Water color
     v4SkyColor = CVECTOR4(1.0f, 1.0f, 1.0f, 1.0f); // engine default Sky color
     v4SeaParameters = CVECTOR4(0.9f, 0.8f, 0.7f, 0.0f); // legacy sea.fx only (scripts override)
 
@@ -119,8 +119,8 @@ SEA::SEA()
     fFoamMoveAngle = 0.0f;
     v4FoamColor = CVECTOR4(1.0f, 1.0f, 1.0f, 1.0f); // engine default Foam Color
 
-    bTransEnable = true; // engine default: Enable translucence = 1
-    bSunRoadEnable = false; // engine default: Enable sunroad = 0
+    bTransEnable = false; // legacy parity: Sea2 has no translucence term (new scripts can enable)
+    bSunRoadEnable = true; // legacy parity: Sea2_SunRoad renders unconditionally
     fTransAngle = 0.6f;
     fTransPower = 6.0f; // engine default
     fTransMultiply = 10.0f; // engine default
@@ -133,27 +133,29 @@ SEA::SEA()
     fSunRoadPower = 130.0f; // engine default
     fSunRoadColorPower = 100.0f; // MOP raw (handler *0.01, Ocean.cpp:890)
     fSunBumpScale = 1.0f; // engine default Scale
-    fSunMultiply = 1.1f; // engine default
-    fSunAmbient = 0.25f; // engine default
+    // Legacy Sea2 diffuse = saturate(dot(normal, sun)) with no scaling:
+    // scripts never send these (NEW names), so defaults are the legacy ones.
+    fSunMultiply = 1.0f;
+    fSunAmbient = 0.0f;
     v4SunRoadColor = CVECTOR4(1.0f, 1.0f, 1.0f, 1.0f); // engine default
 
     fReflMinimum = 0.65f;
     fReflAdd = 2.0f;
     fReflPower = 1.0f;
     fRefrEnvPower = 100.0f;
-    fReflEnvBlend = 0.65f;
-    fReflMin = 0.1f; // engine default Reflection min
-    fReflMax = 0.75f;
-    fRefrPower = 100.0f;
+    fReflEnvBlend = 0.75f; // restored: old Frenel default (NEW ReflEnvBlend wins if set)
+    fReflMin = 0.1f; // no old analog, kept
+    fReflMax = 0.8f; // restored: old Reflection default (NEW ReflMax wins if set)
+    fRefrPower = 90.0f; // no legacy writer (Attenuation drives fLegacyAtten now)
     fTransMin = 0.3f; // engine default Transparency min
     fTransMax = 0.0f; // engine default Transparency max
 
     fFogDistance = 1.0f; // engine default Fog distance
 
-    fFoamV = 0.0f; // engine default Foam start Y
-    fFoamK = 0.2f; // foam rate: engine default height 5 -> 1/5 (legacy (y-V)*K, ocean3 (y-V)*K)
-    fFoamUV = 0.02f; // Blood Foam UV scale
-    fFoamTextureDisturb = 0.01f; // Blood Texture displacement
+    fFoamV = 3.0f; // restored storm default
+    fFoamK = 0.0f; // restored storm default (foam off until scripts: (y-V)*K = 0)
+    fFoamUV = 3.0f; // restored storm default
+    fFoamTextureDisturb = 0.7f; // restored storm default (verify strength on screen: FFT normal scale differs)
     iFoamTexture = -1;
     bIniFoamEnable = false;
     bFoamEnable = false; // engine default: Enable foam = 0 (scripts may enable)
@@ -171,7 +173,7 @@ SEA::SEA()
 
     fFogSeaDensity = 0.0f; // engine default Fog multiply (fog off until scripts set it)
     fFogStartDistance = 0.0f; // engine default Fog start
-    vFogColor = CVECTOR(1.0f, 1.0f, 1.0f); // engine default Fog Color
+    vFogColor = CVECTOR(0.0f, 0.0f, 0.0f); // restored storm default (fog off until scripts set it)
     bFogEnable = false;
 
     pSeaFrame1 = new float[XWIDTH * YWIDTH];
@@ -195,6 +197,9 @@ SEA::SEA()
     bumpScratchB.resize(2 * XWIDTH * YWIDTH, 0.0f);
 
     bTempFullMode = false;
+
+    // Effective amplitudes from restored storm defaults (adapted gain, MaxSeaHeight cap).
+    UpdateLegacyAmp();
 
     pSea = this;
 
@@ -391,8 +396,8 @@ bool SEA::Init()
     BuildVolumeTexture();
 
     // NOTE: legacy EditMode_Update() stub (Amp1=8, test colors) must NOT run
-    // here: constructor defaults are the Blood engine defaults. The stub
-    // remains available for editor/debug use only.
+    // here: constructor defaults are the restored storm defaults (adapted
+    // where FFT/MOP units differ). The stub remains for editor/debug use only.
     return true;
 }
 
@@ -831,6 +836,25 @@ static CVECTOR BloodSunDir(float ax, float ay, bool subPI)
 }
 } // namespace
 
+void SEA::UpdateLegacyAmp()
+{
+    // Legacy script Amp reproduces the legacy crest-to-trough size on FFT
+    // data: old MaxSeaHeight limiter (keeps culling box consistent) times
+    // the baked->FFT energy calibration (measured per Setup; fallback is
+    // the default-spectra value 0.4745/3.8). No extra ceiling: MaxSeaHeight
+    // stays the cap mechanism, as in the old code.
+    const float sum = _fAmp1 + _fAmp2;
+    if (sum <= 1e-6f)
+    {
+        fAmp1 = _fAmp1;
+        fAmp2 = _fAmp2;
+        return;
+    }
+    const float legacyScale = (fMaxSeaHeight >= sum) ? 1.0f : fMaxSeaHeight / sum;
+    fAmp1 = _fAmp1 * legacyScale * fAmpCalib1;
+    fAmp2 = _fAmp2 * legacyScale * fAmpCalib2;
+}
+
 void SEA::SetupFFTFromSea2Attrs()
 {
     // FFT spectra are script-driven (Sea2.FFTLen1/FFTAmp1/...); Setup is
@@ -841,10 +865,37 @@ void SEA::SetupFFTFromSea2Attrs()
     // directional align made streaky jelly + visible tiling (chessboard).
     fftBump.Setup(fFFTLen2, fFFTAmp2 * 1e-10f, fFFTWind2, vFFTDir2.x, vFFTDir2.z, fFFTAlign2);
     fftBumpLen = fFFTLen2;
-    // Blood linkage (Ocean.cpp:1179, m_wavesScale = mopScale*size/len):
-    // sampling scale = script multiplier * spectrum size/len.
-    fScale1 = fSeaScale1 * static_cast<float>(fftWaves.GetSize()) / fFFTLen1;
-    fScale2 = fSeaScale2 * static_cast<float>(fftBump.GetSize()) / fFFTLen2;
+    // Sampling scale is physical: the 128-texel tile covers wave_len meters.
+    fScale1 = static_cast<float>(fftWaves.GetSize()) / fFFTLen1;
+    fScale2 = static_cast<float>(fftBump.GetSize()) / fFFTLen2;
+
+    // Amplitude auto-calibration: legacy baked frames swing 0.4745
+    // peak-to-peak (bytes 67..188 blurred over seaXXXX.tga, /255), FFT
+    // frames swing with spectrum energy. Calibrate so a legacy script Amp
+    // reproduces the legacy crest-to-trough size: fAmp = Amp*(0.4745/swing).
+    // Execute(0) does not advance the wave clock: safe at Setup moments.
+    auto calibSwing = [](fft &f) -> float {
+        f.Execute(0.0f);
+        f.ChangeCurFrame();
+        const fft::dcomplex *fr = f.GetCurFrame();
+        const int n = f.GetSize() * f.GetSize();
+        float fMin = 1e30f, fMax = -1e30f;
+        for (int i = 0; i < n; i++)
+        {
+            const float h = fr[i].c1.Re;
+            if (h < fMin)
+                fMin = h;
+            if (h > fMax)
+                fMax = h;
+        }
+        return fMax - fMin;
+    };
+    const float swing1 = calibSwing(fftWaves);
+    const float swing2 = calibSwing(fftBump);
+    // Fallback 0.125 = 0.4745/3.8 (default spectra) if degenerate.
+    fAmpCalib1 = (swing1 > 1e-6f) ? (0.4745f / swing1) : 0.125f;
+    fAmpCalib2 = (swing2 > 1e-6f) ? (0.4745f / swing2) : 0.125f;
+    UpdateLegacyAmp();
 }
 
 #if SEA_MOP_TEST
@@ -859,17 +910,22 @@ void SEA::ApplyMopTestOverrides()
     fFFTWind1 = 13.49445f;
     vFFTDir1 = CVECTOR(1.0f, 0.0f, 0.0f);
     fFFTAlign1 = 0.1f;
+    bSet_FFTLen1 = bSet_FFTLen2 = true; // explicit MOP lens: legacy Scale must not derive them
+    fLegacyAtten = 0.0f; // Blood has no view-depth term (reference match)
     fFFTLen2 = 338.511841f;
     fFFTAmp2 = 17227.560547f;
     fFFTWind2 = 23.921381f;
     vFFTDir2 = CVECTOR(1.0f, 0.0f, 0.0f);
     fFFTAlign2 = 0.0f;
-    fAnimSpeed1 = 1.038077f;
+    fAnimSpeed1 = 1.038077f; // baked units (SimpleSea path only)
     fAnimSpeed2 = 4.0f;
-    fAmp1 = _fAmp1 = 1.0f; // temp-override, Ocean_pc.cpp:273-274
-    fAmp2 = _fAmp2 = 0.0f;
-    fSeaScale1 = fSeaScale2 = 1.0f; // Waves Scale
+    fFftSpeed1 = 1.038077f; // Blood ocean-sec/sec: NO legacy rescale (reference match)
+    fFftSpeed2 = 4.0f;
+    _fAmp1 = 1.0f; // raw script-side values (effective fAmp assigned below,
+    _fAmp2 = 0.0f; // AFTER Setup: its UpdateLegacyAmp must not win in MOP mode)
     SetupFFTFromSea2Attrs();
+    fAmp1 = 1.0f; // Blood temp-override (Ocean_pc.cpp:273-274): the ocean
+    fAmp2 = 0.0f; // mesh uses raw frame heights, no legacy calibration
     fMaxSeaDistance = 2200.0f;
     vMoveSpeed1 = CVECTOR(3.0f, 0.0f, 0.0f);
     vMoveSpeed2 = CVECTOR(0.0f, 0.0f, 0.0f);
@@ -882,11 +938,15 @@ void SEA::ApplyMopTestOverrides()
     v4SkyColor = CVECTOR4(100.0f / 255.0f, 153.0f / 255.0f, 211.0f / 255.0f, 1.0f);
     fBumpScaleU = 52.815971f; // MOP raw (use: *0.004)
     fBumpScaleV = 92.663956f; // MOP raw (use: *0.004)
+    bSet_BumpU = bSet_BumpV = true; // NEW mode: legacy BumpScale must not overwrite
     fBumpPower = 0.191265f;
     fBumpAngle = 60.0f * 3.14159265f / 180.0f;
     fBumpMoveSpeed = 1.898017f;
+    bSet_BumpMoveSpeed = true; // NEW mode: legacy BumpSpeed must not overwrite
     fFoamV = -1.8f; // scene -3.8 shifted +2 for datum 0 (same foam response)
     fFoamK = 1.0f / 6.975295f; // scene Foam height Y as rate
+    fFoamUV = 0.02f; // Blood engine default (scene does not override; tile = 1/UV m)
+    fFoamTextureDisturb = 0.01f; // Blood engine default (scene does not override)
     fFoamPower = 1.0f;
     fFoamBright = 0.65f;
     fFoamAngle = 0.0f;
@@ -915,11 +975,15 @@ void SEA::ApplyMopTestOverrides()
     fReflPower = 1.0f;
     fRefrEnvPower = 100.0f;
     fReflEnvBlend = 0.65f;
+    bSet_ReflEnvBlend = true; // NEW mode: legacy Frenel must not overwrite
+    bSet_Frenel = false; // Blood has no Frenel term: full curve (reference)
     fReflMin = 1.0f;
     fReflMax = 0.75f;
-    fRefrPower = 100.0f;
+    bSet_ReflMax = true; // NEW mode: legacy Reflection must not overwrite
+    fRefrPower = 100.0f; // no legacy writer (Attenuation drives fLegacyAtten)
     fTransMin = 0.1f;
-    fTransMax = 0.000289f;
+    bSet_TransMin = true; // explicit MOP value: legacy Transparency must not overwrite
+    fTransMax = 0.000289f; // no legacy writer (Transparency drives TransMin)
     fFogSeaDensity = 0.8f;
     fFogStartDistance = 243.333435f;
     fFogDistance = 1339.96521f;
@@ -997,13 +1061,18 @@ void SEA::GenerateBumpMapFFT()
         }
 
         D3DLOCKED_RECT lr;
-        // Never silently swallow a lock failure (used to hide C1-class bugs).
-        // Packing replicates Blood ARGB(fz,0,0,fx) exactly: A=nz, B=nx, R=G=0,
-        // channels wrap mod 256 (x64 DWORD(float) semantics), no clamp.
+        // Packing replicates Blood ARGB(fz,0,0,fx) channels (A=nz, B=nx,
+        // R=G=0), but CLAMPED, not wrapped: legacy baked bytes were clamped
+        // by construction, and wrap turns steep slopes into speckle.
         auto packB = [](float v) -> uint32_t {
-            const int q = (int)(v * 127.5f + 127.5f);
-            return (uint32_t)(q & 0xFF);
+            int q = (int)(v * 127.5f + 127.5f);
+            if (q < 0)
+                q = 0;
+            else if (q > 255)
+                q = 255;
+            return (uint32_t)q;
         };
+        // Never silently swallow a lock failure (used to hide C1-class bugs).
         if (SUCCEEDED(pLiveBumpMap->LockRect(lev, &lr, nullptr, (lev == 0) ? D3DLOCK_DISCARD : 0)) && lr.pBits)
         {
             auto *dst = static_cast<uint8_t *>(lr.pBits);
@@ -1065,9 +1134,8 @@ bool SEA::SetupOcean3Effect(const CMatrix &mWorldViewProj, const CVECTOR4 &camPo
     // Refraction params: power, env power, multiply, color multiply (x1000 in MOP).
     CVECTOR4 refr = CVECTOR4(fRefrPower * 0.001f, fRefrEnvPower * 0.001f, fReflAdd, fReflPower);
     CVECTOR4 refr2 = CVECTOR4(fReflMinimum, fReflEnvBlend, 0.0f, 0.0f);
-    // MOP sun (Blood look is scene-independent: glitter/diffuse always from
-    // these dirs; scene-driven sun killed the night glitter). Scene variant
-    // lives under the #if block below for future weather sea states.
+    // Sun dirs: Blood-fixed below as fallback; scene light 0 overrides them
+    // in the block below (legacy behavior: glitter follows scene weather).
     CVECTOR sunDir = BloodSunDir(fSunRoadAngX, fSunRoadAngY, true);
     CVECTOR sunLDir = BloodSunDir(fSunAngX, fSunAngY, false);
     // SunRoadColorPower is MOP raw here (Color power 100): Blood pre-
@@ -1075,7 +1143,8 @@ bool SEA::SetupOcean3Effect(const CMatrix &mWorldViewProj, const CVECTOR4 &camPo
     CVECTOR4 sunRoadColor = CVECTOR4(v4SunRoadColor.x * fSunRoadColorPower * 0.01f,
                                      v4SunRoadColor.y * fSunRoadColorPower * 0.01f,
                                      v4SunRoadColor.z * fSunRoadColorPower * 0.01f, 1.0f);
-#if 0 // MOP sun for reference match (scene sun under test separately)
+#if 0 // Scene sun OFF: zenith scene sun smears the road over the whole sea.
+    // Road and diffuse stay Blood-fixed (road elevation tuned to +15°).
     D3DLIGHT9 sceneSun{};
     if (rs->GetLight(0, &sceneSun))
     {
@@ -1093,7 +1162,10 @@ bool SEA::SetupOcean3Effect(const CMatrix &mWorldViewProj, const CVECTOR4 &camPo
     }
 #endif
     CVECTOR4 sunLight = CVECTOR4(sunLDir.x, sunLDir.y, sunLDir.z, 0.0f);
-    CVECTOR4 sunLightParams = CVECTOR4(fSunMultiply, fSunAmbient, 0.0f, 0.0f);
+    // Fresnel strength only when Sea2.Frenel arrived (legacy: ceiling of the
+    // response, ref 0.75); otherwise full curve (z = 1).
+    CVECTOR4 sunLightParams = CVECTOR4(
+        fSunMultiply, fSunAmbient, bSet_Frenel ? Min(2.0f, Max(0.0f, fFrenel / 0.75f)) : 1.0f, 0.0f);
     CVECTOR4 sunRoad = CVECTOR4(sunDir.x, sunDir.y, sunDir.z, fSunRoadPower);
     // Bump UV scales + directional scroll. fBumpScaleU/V are MOP raw
     // (Ocean.cpp:961-962 pre-multiplies *0.004 at load).
@@ -1112,10 +1184,11 @@ bool SEA::SetupOcean3Effect(const CMatrix &mWorldViewProj, const CVECTOR4 &camPo
     CVECTOR4 transAngle = CVECTOR4(fTransAngle, 0.0f, 0.0f, 0.0f);
     CVECTOR4 transParams = CVECTOR4(fTransPower, fTransMultiply, 0.0f, 0.0f);
     CVECTOR4 transColor = CVECTOR4(v4TransColor.x, v4TransColor.y, v4TransColor.z, 1.0f);
-    // PS fog uses exp falloff with this density (0 = off, as in Sea2).
-    // fog/SeaDensity doubles as the Ocean3 fog multiplier (Blood 0.8).
-    CVECTOR4 fogParams =
-        CVECTOR4(bFogEnable ? fFogSeaDensity : 0.0f, 1.0f / fFogDistance, fFogStartDistance, 0.0f);
+    // PS fog: legacy curve 1 - 2^(-(dist-start)*Density/FogDistance).
+    // FogDistance default 1.0 reduces it to the exact legacy curve for
+    // legacy scripts; MOP scenes send their distance (1339.9) with their
+    // density (0.8). Gated by fog/Enable (0 = off, as in Sea2).
+    CVECTOR4 fogParams = CVECTOR4(bFogEnable ? fFogSeaDensity : 0.0f, fFogDistance, fFogStartDistance, 0.0f);
     CVECTOR4 fogColor = CVECTOR4(vFogColor.x, vFogColor.y, vFogColor.z, 1.0f);
     CVECTOR4 distFade = CVECTOR4(1.0f / fMaxSeaDistance, 0.0f, 0.0f, 0.0f); // Blood 1/Waves Distance
 
@@ -1147,8 +1220,9 @@ bool SEA::SetupOcean3Effect(const CMatrix &mWorldViewProj, const CVECTOR4 &camPo
 
     // Pixel-shader copies (separate register file).
     // Enables are live: scripts toggle foam/sunroad per weather.
-    CVECTOR4 misc =
-        CVECTOR4(bFoamEnable ? 1.0f : 0.0f, bTransEnable ? 1.0f : 0.0f, bSunRoadEnable ? 1.0f : 0.0f, 0.0f);
+    // psMisc.w carries Sea2.Attenuation (0 = off).
+    CVECTOR4 misc = CVECTOR4(bFoamEnable ? 1.0f : 0.0f, bTransEnable ? 1.0f : 0.0f,
+                             bSunRoadEnable ? 1.0f : 0.0f, fLegacyAtten);
     CVECTOR4 sunBump = CVECTOR4(fSunBumpScale, 1.0f, fSunBumpScale, 1.0f); // Blood exact
     setVec("psSunRoadColor", sunRoadColor);
     setVec("psWater", v4SeaColor);
@@ -1543,6 +1617,14 @@ void SEA::Realize(uint32_t dwDeltaTime)
     ApplyMopTestOverrides(); // TEMP: MOP scene values, scripts bypassed
 #endif
 
+    // Deferred spectra re-Setup (Scale/FFT handlers only mark dirty):
+    // at most one ~50 ms hitch per frame on weather change.
+    if (bFFTDirty)
+    {
+        bFFTDirty = false;
+        SetupFFTFromSea2Attrs();
+    }
+
     // Blood Stop freezes animation but keeps drawing (m_oceanAnimate=0):
     // zero the clock, still render the frame.
     if (bStop)
@@ -1644,9 +1726,11 @@ void SEA::Realize(uint32_t dwDeltaTime)
     // Live FFT waves: advance both spectra and publish new frames for
     // WaveXZ/SSE_WaveXZ/GenerateBumpMapFFT below (Ocean3 Executor equivalent,
     // single-threaded; SSE_WaveXZBlock still runs on par_unseq).
-    // Bump (chop) time runs at true wave_speed2 (Blood engine default 2.0).
-    fftWaves.Execute(fDeltaTime * fAnimSpeed1);
-    fftBump.Execute(fDeltaTime * fAnimSpeed2);
+    // fFftSpeed is ocean-sec/sec (legacy AnimSpeed rescaled at the handler,
+    // MOP wave_speed stored raw). SimpleSea baked frames below keep raw
+    // AnimSpeed: same baked units as before.
+    fftWaves.Execute(fDeltaTime * fFftSpeed1);
+    fftBump.Execute(fDeltaTime * fFftSpeed2);
     fftWaves.ChangeCurFrame();
     fftBump.ChangeCurFrame();
     fftWavesFrame = fftWaves.GetCurFrame();
@@ -2168,54 +2252,92 @@ uint32_t SEA::AttributeChanged(ATTRIBUTES *pAttribute)
         if (*pAttribute == "Amp1")
         {
             _fAmp1 = pAttribute->GetAttributeAsFloat();
-            // fAmp1 stays 1.0 (Blood temp-override, Ocean_pc.cpp:273-274):
-            // the ocean mesh ignores amplitude in Blood. NOTE this is NOT
-            // a stub: wiring script Amp (legacy storm values up to 8) into
-            // the hotter FFT frame (+-1.9) gives +-15 m mountains that bury
-            // ships (verified on-screen). Blood seas are always +-2 m.
-            // Transcription: do NOT copy "Waves Amplitude" here at all.
+            // Restored legacy behavior: effective amplitude follows script Amp,
+            // limited by MaxSeaHeight (UpdateLegacyAmp) so old Amp 8 scenes
+            // don't bury ships under +-15 m mountains.
+            UpdateLegacyAmp();
             return 0;
         }
         if (*pAttribute == "AnimSpeed1")
         {
+            // Stored raw (baked frames/sec for SimpleSea); FFT time rescaled
+            // below (MOP wave_speed bypasses the rescale: ocean-sec natively).
             fAnimSpeed1 = pAttribute->GetAttributeAsFloat();
+            fFftSpeed1 = fAnimSpeed1 * SEA_FFT_TIME_SCALE;
             return 0;
         }
         if (*pAttribute == "Scale1")
         {
-            // Blood Waves Scale multiplier (Ocean.cpp:1179: scale = mop*size/len).
-            fSeaScale1 = pAttribute->GetAttributeAsFloat();
-            SetupFFTFromSea2Attrs();
+            // Legacy tile control: the 128-texel tile covers 128/Scale meters
+            // (0.5 -> 256 m swells). Derive FFTLen so the tile matches legacy
+            // exactly; sampling follows as 128/len. NEW FFTLen1 wins if
+            // explicitly set. Deferred via dirty flag (one Setup per frame).
+            if (!bSet_FFTLen1)
+            {
+                fFFTLen1 = 128.0f / Max(0.01f, pAttribute->GetAttributeAsFloat());
+                bFFTDirty = true;
+            }
             return 0;
         }
         if (*pAttribute == "MoveSpeed1")
         {
             sscanf(pAttribute->GetThisAttr(), "%f, %f, %f", &vMoveSpeed1.x, &vMoveSpeed1.y, &vMoveSpeed1.z);
+            // Legacy wave-travel direction -> FFT propagation dir (speed itself
+            // travels via AnimSpeed; wind magnitude stays Blood-tuned).
+            // NEW FFTDir1 wins if explicitly set.
+            if (!bSet_FFTDir1)
+            {
+                const float fLen = sqrtf(vMoveSpeed1.x * vMoveSpeed1.x + vMoveSpeed1.z * vMoveSpeed1.z);
+                if (fLen > 1e-6f)
+                {
+                    vFFTDir1.x = vMoveSpeed1.x / fLen;
+                    vFFTDir1.z = vMoveSpeed1.z / fLen;
+                    bFFTDirty = true;
+                }
+            }
             return 0;
         }
 
         if (*pAttribute == "Amp2")
         {
-            // Transcription: keep 0. Blood has NO bump geometry term
-            // (WaveXZ samples the waves layer only, Ocean_pc.cpp:208-268).
-            // fAmp2 stays 0.0 for the same mountains reason as Amp1 above.
+            // Restored legacy behavior (see Amp1): bump geometry term follows
+            // script Amp2, limited by MaxSeaHeight.
             _fAmp2 = pAttribute->GetAttributeAsFloat();
+            UpdateLegacyAmp();
             return 0;
         }
         if (*pAttribute == "AnimSpeed2")
         {
             fAnimSpeed2 = pAttribute->GetAttributeAsFloat();
+            fFftSpeed2 = fAnimSpeed2 * SEA_FFT_TIME_SCALE;
             return 0;
         }
         if (*pAttribute == "Scale2")
         {
-            fSeaScale2 = pAttribute->GetAttributeAsFloat();
-            SetupFFTFromSea2Attrs();
+            // Same tile derivation for the chop layer (legacy Scale2 = 2.0
+            // -> 64 m tile). NEW FFTLen2 wins if explicitly set.
+            if (!bSet_FFTLen2)
+            {
+                fFFTLen2 = 128.0f / Max(0.01f, pAttribute->GetAttributeAsFloat());
+                bFFTDirty = true;
+            }
             return 0;
         }
         if (*pAttribute == "MoveSpeed2")
         {
             sscanf(pAttribute->GetThisAttr(), "%f, %f, %f", &vMoveSpeed2.x, &vMoveSpeed2.y, &vMoveSpeed2.z);
+            // Same direction derivation for the chop layer (see MoveSpeed1).
+            // NEW FFTDir2 wins if explicitly set.
+            if (!bSet_FFTDir2)
+            {
+                const float fLen = sqrtf(vMoveSpeed2.x * vMoveSpeed2.x + vMoveSpeed2.z * vMoveSpeed2.z);
+                if (fLen > 1e-6f)
+                {
+                    vFFTDir2.x = vMoveSpeed2.x / fLen;
+                    vFFTDir2.z = vMoveSpeed2.z / fLen;
+                    bFFTDirty = true;
+                }
+            }
             return 0;
         }
 
@@ -2232,18 +2354,24 @@ uint32_t SEA::AttributeChanged(ATTRIBUTES *pAttribute)
             fBumpScale = pAttribute->GetAttributeAsFloat();
             // Legacy single value is storm-final; convert to MOP raw
             // (scripts without the new U/V split keep working).
-            fBumpScaleU = fBumpScaleV = fBumpScale / 0.004f;
+            // NEW wins: skip if BumpScaleU/V were explicitly set.
+            if (!bSet_BumpU)
+                fBumpScaleU = fBumpScale / 0.004f;
+            if (!bSet_BumpV)
+                fBumpScaleV = fBumpScale / 0.004f;
             return 0;
         }
         // Ocean3 bump tiling (no legacy analog). MOP raw units
         // (Ocean.cpp:961-962 pre-multiplies *0.004 at use).
         if (*pAttribute == "BumpScaleU")
         {
+            bSet_BumpU = true;
             fBumpScaleU = pAttribute->GetAttributeAsFloat();
             return 0;
         }
         if (*pAttribute == "BumpScaleV")
         {
+            bSet_BumpV = true;
             fBumpScaleV = pAttribute->GetAttributeAsFloat();
             return 0;
         }
@@ -2260,12 +2388,17 @@ uint32_t SEA::AttributeChanged(ATTRIBUTES *pAttribute)
         }
         if (*pAttribute == "BumpMoveSpeed")
         {
+            bSet_BumpMoveSpeed = true;
             fBumpMoveSpeed = pAttribute->GetAttributeAsFloat();
             return 0;
         }
         if (*pAttribute == "BumpSpeed")
         {
             fBumpSpeed = pAttribute->GetAttributeAsFloat();
+            // Legacy clock drives Ocean3 scroll as fallback (defaults match:
+            // legacy 1.0 -> 100 * 0.005 = 0.5 m/s). NEW wins if explicitly set.
+            if (!bSet_BumpMoveSpeed)
+                fBumpMoveSpeed = fBumpSpeed * 100.0f;
             return 0;
         }
         if (*pAttribute == "LodScale")
@@ -2282,22 +2415,40 @@ uint32_t SEA::AttributeChanged(ATTRIBUTES *pAttribute)
         if (*pAttribute == "Reflection")
         {
             v4SeaParameters.y = pAttribute->GetAttributeAsFloat();
+            // Legacy fallback for Ocean3 (NEW ReflMax wins if explicitly set).
+            if (!bSet_ReflMax)
+                fReflMax = v4SeaParameters.y;
             return 0;
         }
         if (*pAttribute == "Transparency")
         {
+            // Legacy storm see-through -> refraction mix floor (nadir).
+            // NEW TransMin wins if explicitly set.
+            // ITER2: seabed is now in the refraction target, so the mix can
+            // go back up: 0.33 left the bank veiled (old alpha ~0.9).
             v4SeaParameters.z = pAttribute->GetAttributeAsFloat();
+            if (!bSet_TransMin)
+                fTransMin = v4SeaParameters.z * 0.6f;
             return 0;
         }
         if (*pAttribute == "Attenuation")
         {
+            // Legacy view-depth darkening of the reflection term
+            // (sea_shaders.h:109-112: sky x 2^(-Att/|cosV|)). Carried to the
+            // PS in psMisc.w; 0 = off. Legacy slot kept for SimpleSea.
             v4SeaParameters.x = pAttribute->GetAttributeAsFloat();
+            fLegacyAtten = v4SeaParameters.x;
             return 0;
         }
 
         if (*pAttribute == "Frenel")
         {
+            bSet_Frenel = true;
             fFrenel = pAttribute->GetAttributeAsFloat();
+            // Legacy fallback for Ocean3 env blend (defaults 0.75 vs 0.65).
+            // NEW ReflEnvBlend wins if explicitly set.
+            if (!bSet_ReflEnvBlend)
+                fReflEnvBlend = fFrenel;
             return 0;
         }
 
@@ -2457,6 +2608,7 @@ uint32_t SEA::AttributeChanged(ATTRIBUTES *pAttribute)
         }
         if (*pAttribute == "ReflEnvBlend")
         {
+            bSet_ReflEnvBlend = true;
             fReflEnvBlend = pAttribute->GetAttributeAsFloat();
             return 0;
         }
@@ -2467,6 +2619,7 @@ uint32_t SEA::AttributeChanged(ATTRIBUTES *pAttribute)
         }
         if (*pAttribute == "ReflMax")
         {
+            bSet_ReflMax = true;
             fReflMax = pAttribute->GetAttributeAsFloat();
             return 0;
         }
@@ -2477,6 +2630,7 @@ uint32_t SEA::AttributeChanged(ATTRIBUTES *pAttribute)
         }
         if (*pAttribute == "TransMin")
         {
+            bSet_TransMin = true;
             fTransMin = pAttribute->GetAttributeAsFloat();
             return 0;
         }
@@ -2485,73 +2639,77 @@ uint32_t SEA::AttributeChanged(ATTRIBUTES *pAttribute)
             fTransMax = pAttribute->GetAttributeAsFloat();
             return 0;
         }
-        // Ocean3 FFT spectra (no legacy analog; re-Setup on change).
-        // MOP raw units, Blood transforms at load (Ocean.cpp:869-876).
+        // Ocean3 FFT spectra (no legacy analog; deferred re-Setup via
+        // bFFTDirty). MOP raw units, Blood transforms at load.
         if (*pAttribute == "FFTLen1")
         {
+            bSet_FFTLen1 = true;
             fFFTLen1 = pAttribute->GetAttributeAsFloat();
-            SetupFFTFromSea2Attrs();
+            bFFTDirty = true;
             return 0;
         }
         if (*pAttribute == "FFTAmp1")
         {
             fFFTAmp1 = pAttribute->GetAttributeAsFloat();
-            SetupFFTFromSea2Attrs();
+            bFFTDirty = true;
             return 0;
         }
         if (*pAttribute == "FFTWind1")
         {
             fFFTWind1 = pAttribute->GetAttributeAsFloat();
-            SetupFFTFromSea2Attrs();
+            bFFTDirty = true;
             return 0;
         }
         if (*pAttribute == "FFTDir1")
         {
             // MOP raw: wave propagation angle in radians (Ocean.cpp:872-874:
             // drx=cos(y), drz=sin(y)).
+            bSet_FFTDir1 = true;
             const float fAng = pAttribute->GetAttributeAsFloat();
             vFFTDir1.x = cosf(fAng);
             vFFTDir1.z = sinf(fAng);
-            SetupFFTFromSea2Attrs();
+            bFFTDirty = true;
             return 0;
         }
         if (*pAttribute == "FFTAlign1")
         {
             fFFTAlign1 = pAttribute->GetAttributeAsFloat();
-            SetupFFTFromSea2Attrs();
+            bFFTDirty = true;
             return 0;
         }
         if (*pAttribute == "FFTLen2")
         {
+            bSet_FFTLen2 = true;
             fFFTLen2 = pAttribute->GetAttributeAsFloat();
-            SetupFFTFromSea2Attrs();
+            bFFTDirty = true;
             return 0;
         }
         if (*pAttribute == "FFTAmp2")
         {
             fFFTAmp2 = pAttribute->GetAttributeAsFloat();
-            SetupFFTFromSea2Attrs();
+            bFFTDirty = true;
             return 0;
         }
         if (*pAttribute == "FFTWind2")
         {
             fFFTWind2 = pAttribute->GetAttributeAsFloat();
-            SetupFFTFromSea2Attrs();
+            bFFTDirty = true;
             return 0;
         }
         if (*pAttribute == "FFTDir2")
         {
             // MOP raw: radians angle (Ocean.cpp:952-954: drx=cos, drz=sin).
+            bSet_FFTDir2 = true;
             const float fAng = pAttribute->GetAttributeAsFloat();
             vFFTDir2.x = cosf(fAng);
             vFFTDir2.z = sinf(fAng);
-            SetupFFTFromSea2Attrs();
+            bFFTDirty = true;
             return 0;
         }
         if (*pAttribute == "FFTAlign2")
         {
             fFFTAlign2 = pAttribute->GetAttributeAsFloat();
-            SetupFFTFromSea2Attrs();
+            bFFTDirty = true;
             return 0;
         }
         // Ocean3 fog distance (no legacy analog; fog/SeaDensity = multiplier).
@@ -2619,9 +2777,11 @@ uint32_t SEA::AttributeChanged(ATTRIBUTES *pAttribute)
 
     if (*pAttribute == "MaxSeaHeight")
     {
-        // Culling/distance box only. Mesh amplitude stays pinned (see Amp1):
-        // scaling fAmp here would reintroduce the mountains.
         fMaxSeaHeight = AttributesPointer->GetAttributeAsFloat("MaxSeaHeight", 50.0f);
+
+        // Same adapted legacy formula as Amp1/Amp2 (see UpdateLegacyAmp):
+        // old limiter + FFT gain compensation.
+        UpdateLegacyAmp();
     }
 
     if (*pAttribute == "MaxDim")        { dwMaxDim = pAttribute->GetAttributeAsDword(); return 0; }

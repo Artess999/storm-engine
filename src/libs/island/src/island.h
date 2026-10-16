@@ -53,7 +53,6 @@ class ISLAND : public ISLAND_BASE
 
     FRECT rIsland;
     bool bForeignModels;
-    bool bDrawReflections;
     float fStepDX, fStepDZ, fStep1divDX, fStep1divDZ;
     float fShadowMapSize, fShadowMapStep;
     CVECTOR vBoxSize, vBoxCenter, vRealBoxSize;

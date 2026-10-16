@@ -321,6 +321,16 @@ bool SEA::Refraction_Render()
             core.Send_Message(ent_id, "ll", MSG_SEA_REFLECTION_DRAW, static_cast<int32_t>(bSimpleSea));
         }
     }
+    // The island (with its underwater seabed shelf) is not in the reflection
+    // layers, but the live-camera refraction pass must draw it: shallows show
+    // through the opaque Ocean3 surface only via this target.
+    {
+        entid_t isl = core.GetEntityId("ISLAND");
+        if (isl && core.GetEntityPointer(isl) != nullptr)
+        {
+            core.Send_Message(isl, "ll", MSG_SEA_REFLECTION_DRAW, static_cast<int32_t>(bSimpleSea));
+        }
+    }
 
     rs->EndScene();
     if (pRefrSurface)

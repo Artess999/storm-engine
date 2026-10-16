@@ -66,7 +66,10 @@ void fft::Init(int size)
     m_nxyUnaligned = new char[sizeof(float) * m_size + 16];
     m_nxy = static_cast<float *>(Align16(m_nxyUnaligned));
 
-    srand(static_cast<unsigned>(time(nullptr)));
+    // Distinct phases per layer (two Init calls in the same second would
+    // share one time() seed otherwise) with per-launch variety.
+    static uint32_t s_fftSalt = 0;
+    srand(static_cast<unsigned>(time(nullptr)) + s_fftSalt++ * 0x9E3779B9u);
     m_gausRND = new complex[m_size * m_size];
     for (int i = 0; i < m_size * m_size; i++)
     {

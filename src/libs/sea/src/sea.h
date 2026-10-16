@@ -185,12 +185,23 @@ class SEA : public SEA_BASE
 
     CVECTOR vMove1, vMove2;
     float fFrame1, fFrame2;
-    float fScale1, fScale2; // effective sampling scales (multiplier * size/len)
-    float fSeaScale1, fSeaScale2; // Sea2.Scale1/Scale2 script multipliers (Blood Waves Scale)
+    float fScale1, fScale2; // effective sampling scales (128 spectrum texels / FFTLen)
+    float fAmpCalib1 = 0.125f, fAmpCalib2 = 0.125f; // legacy->FFT gain (measured per Setup; fallback = 0.4745/3.8)
+    bool bFFTDirty = false; // spectra params changed -> re-Setup once in Realize
+    bool bSet_FFTLen1 = false, bSet_FFTLen2 = false; // NEW len wins: legacy Scale must not derive it
+    bool bSet_FFTDir1 = false, bSet_FFTDir2 = false; // NEW dir wins: legacy MoveSpeed must not derive it
     float fSeaHeight, fSeaFake; // Sea2 Height / FakeOffset (NEW, engine defaults 0)
     float fAmp1, fAmp2;
     float _fAmp1, _fAmp2;
-    float fAnimSpeed1, fAnimSpeed2;
+    void UpdateLegacyAmp();
+    // NEW-attr wins: once a NEW attribute arrives, legacy fallback no longer
+    // overwrites it (attribute order in scripts is arbitrary).
+    bool bSet_BumpU = false, bSet_BumpV = false, bSet_BumpMoveSpeed = false;
+    bool bSet_ReflMax = false, bSet_TransMin = false;
+    bool bSet_ReflEnvBlend = false;
+    bool bSet_Frenel = false; // Sea2.Frenel arrived (strength applies); else full curve
+    float fAnimSpeed1, fAnimSpeed2; // legacy baked frames/sec (SimpleSea path)
+    float fFftSpeed1, fFftSpeed2; // FFT ocean-sec/sec (Execute time base)
     float fPosShift;
     float fFrenel;
 
@@ -223,12 +234,13 @@ class SEA : public SEA_BASE
     bool bSunRoadEnable;
     float fTransAngle, fTransPower, fTransMultiply;
     CVECTOR4 v4TransColor;
-    // Ocean3 reflection/refraction mix (NEW, no legacy analog: ReflMinimum,
+    // Ocean3 reflection/refraction mix (NEW: ReflMinimum,
     // ReflAdd, ReflPower, RefrEnvPower, ReflEnvBlend, ReflMin, ReflMax,
     // RefrPower, TransMin, TransMax; legacy Reflection/Transparency/
-    // Attenuation/Frenel keep driving the legacy Sea2 path only).
+    // Attenuation/Frenel drive these as fallback unless the NEW name was set).
     float fReflMinimum, fReflAdd, fReflPower, fRefrEnvPower, fReflEnvBlend;
     float fReflMin, fReflMax, fRefrPower, fTransMin, fTransMax;
+    float fLegacyAtten = 0.0f; // Sea2.Attenuation (view-depth reflection darkening, 0 = off)
     // Ocean3 fog distance (NEW: FogDistance; fog/Enable/Start/Color reuse
     // the legacy slots, fog/SeaDensity doubles as the fog multiplier).
     float fFogDistance;

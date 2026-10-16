@@ -9,6 +9,10 @@
 // Planar reflection targets (Ocean3 rr_size equivalent). Cubemaps stay 128.
 #define SEA_REFLECTION_SIZE 512
 
+// Legacy AnimSpeed (baked frames/sec) -> FFT ocean-sec/sec. Anchor: old
+// default 6 ~= Blood wave_speed 1.25. Single scale: script L1:L2 ratios kept.
+// (MOP scenes carry ocean-sec natively and bypass the rescale.)
+#define SEA_FFT_TIME_SCALE (1.25f / 6.0f)
 // TEMP MOP-scene test override: forces every ocean member each frame,
 // scripts bypassed. Scene datum Height -2 via fSeaHeight in the override.
 #define SEA_MOP_TEST 0
